@@ -447,6 +447,7 @@ impl<'a> RRule<'a> {
             if next_date <= start_date {
                 next_date = next_date.with_year(next_date.year() + 1).unwrap();
             }
+            next_date = next_date.with_month(by_month_u32).unwrap();
         }
 
         // If the calculated next_date is greater than the start date we don't need to add another month
