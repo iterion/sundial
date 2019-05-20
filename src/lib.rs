@@ -2,7 +2,7 @@
 extern crate pest_derive;
 
 use chrono::prelude::*;
-use chrono::{Duration, TimeZone};
+use chrono::{Duration, TimeZone, Weekday};
 use chrono_tz::Tz;
 use pest::Parser;
 use serde::Deserialize;
@@ -504,42 +504,41 @@ impl<'a> RRule<'a> {
         let interval: u32 = self.interval.parse().unwrap_or(1);
         let mut next_date = start_date_with_intervals;
 
-        if by_month.is_empty() {
-            if by_day.is_empty() {
-                if start_date.eq(&next_date) {
-                    next_date = next_date + Duration::days(1);
-                }
-                for _i in 1..interval {
-                    next_date = next_date + Duration::days(1);
-                }
-            } else {
-                loop {
-                    for _i in 0..interval {
-                        next_date = next_date + Duration::days(1);
-                    }
-                    if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day) {
-                        break;
-                    }
-                }
+        if !by_month.is_empty() {
+            let by_month_u32 = by_month.parse::<u32>().unwrap();
+            if by_month_u32 <= next_date.month() {
+                next_date = next_date.with_year(next_date.year() + 1).unwrap();
             }
-        } else if by_day.is_empty() {
-            for _i in 0..interval {
-                next_date = next_date + Duration::days(1);
-            }
-        } else {
-            loop {
-                for _i in 0..interval {
-                    next_date = next_date + Duration::days(1);
-                }
-                if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day)
-                    && next_date.month().eq(&(by_month.parse::<u32>().unwrap()))
-                {
-                    break;
-                }
-            }
+            next_date = next_date.with_month(by_month_u32).unwrap();
         }
 
-        next_date
+        println!("bef: {}\t{}", next_date, start_date);
+        if !by_day.is_empty() {
+            // TODO set day
+            // let weekday: Weekday = by_day.parse().unwrap();
+            // let target_weekday_from_mon = weekday.num_days_from_monday() as i64;
+            // let start_weekday_from_mon = weekday.num_days_from_monday() as i64;
+            let days_to_adjust = self.calculate_weekday_distance(
+                by_day,
+                start_date.weekday(),
+                next_date <= start_date,
+            );
+            next_date = next_date + Duration::days(days_to_adjust);
+            println!("aft: {}\t{}", next_date, start_date);
+            let diff = next_date - start_date;
+
+            let weeks_to_adjust = if diff > Duration::seconds(0) && diff < Duration::weeks(1) {
+                Duration::weeks(0)
+            } else {
+                Duration::weeks(interval as i64 - 1)
+            };
+            return next_date + weeks_to_adjust;
+        }
+
+        // If the calculated next_date is greater than the start date we don't need to add another
+        // hour
+        let diff: i64 = if next_date.gt(&start_date) { -1 } else { 0 };
+        next_date + Duration::days(interval as i64 + diff)
     }
 
     fn handle_hourly(&self, start_date: DateTime<Tz>) -> DateTime<Tz> {
@@ -1132,7 +1131,7 @@ fn lens_iter_dates(
 ) -> Vec<DateTime<Tz>> {
     let mut lensed_dates_list: Vec<DateTime<Tz>> = Vec::new();
     for date in dates_list.iter() {
-        if date.ge(&lens_from_date) {
+        if date.gt(&lens_from_date) {
             // only add dates in the future
             lensed_dates_list.push(date.to_owned())
         }
