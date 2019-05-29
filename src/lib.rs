@@ -496,39 +496,46 @@ impl<'a> RRule<'a> {
 
         if !by_month.is_empty() {
             let by_month_u32 = by_month.parse::<u32>().unwrap();
-            if by_month_u32 <= next_date.month() {
-                next_date = next_date.with_year(next_date.year() + 1).unwrap();
-            }
             next_date = next_date.with_month(by_month_u32).unwrap();
+            if start_date.month() != by_month_u32 {
+                next_date = next_date.with_day(1).unwrap();
+            }
         }
 
         println!("bef: {}\t{}", next_date, start_date);
         if !by_day.is_empty() {
-            // TODO set day
-            // let weekday: Weekday = by_day.parse().unwrap();
-            // let target_weekday_from_mon = weekday.num_days_from_monday() as i64;
-            // let start_weekday_from_mon = weekday.num_days_from_monday() as i64;
+            // will adding days exceed the month?
+            // move to the next year if so
             let days_to_adjust = self.calculate_weekday_distance(
                 by_day,
-                start_date.weekday(),
-                next_date <= start_date,
+                next_date.weekday(),
+                next_date < start_date,
             );
             next_date = next_date + Duration::days(days_to_adjust);
-            println!("aft: {}\t{}", next_date, start_date);
-            let diff = next_date - start_date;
 
-            let weeks_to_adjust = if diff > Duration::seconds(0) && diff < Duration::weeks(1) {
-                Duration::weeks(0)
+            //let diff = next_date - start_date;
+
+            let weeks_to_adjust = if next_date <= start_date {
+                Duration::weeks(interval as i64)
             } else {
-                Duration::weeks(interval as i64 - 1)
+                Duration::weeks(0)
             };
-            return next_date + weeks_to_adjust;
+            println!("added {:?} weeks", weeks_to_adjust);
+            next_date = next_date + weeks_to_adjust;
         }
+        println!("aft: {}\t{}", next_date, start_date);
 
         // If the calculated next_date is greater than the start date we don't need to add another
-        // hour
-        let diff: i64 = if next_date.gt(&start_date) { -1 } else { 0 };
-        next_date + Duration::days(interval as i64 + diff)
+        // interval
+        if next_date.le(&start_date) {
+            next_date = next_date + Duration::days(interval as i64)
+        }
+
+        if next_date <= start_date {
+            next_date = next_date.with_year(next_date.year() + 1).unwrap();
+        }
+
+        next_date
     }
 
     fn handle_hourly(&self, start_date: DateTime<Tz>) -> DateTime<Tz> {
