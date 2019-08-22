@@ -81,9 +81,7 @@ byday_expr = { "BYDAY=" ~ byday_field }
 monthnum_field = @{ ASCII_DIGIT* ~ ("," ~ ASCII_DIGIT*)? }
 bymonth_expr = { "BYMONTH=" ~ monthnum_field }
 
-BYMONTHDAY_DIGIT = { '1'..'9' |                        // 1-9
-                    ('1'..'2' ~ '1'..'9') |            // 10-29
-                    ("3" ~ '0'..'1') }                 // 30-31
+BYMONTHDAY_DIGIT = { '0'..'9' }
 bymonthday_field = @{ BYMONTHDAY_DIGIT* ~ ("," ~ BYMONTHDAY_DIGIT*)? }
 bymonthday_expr = { "BYMONTHDAY=" ~ bymonthday_field }
 

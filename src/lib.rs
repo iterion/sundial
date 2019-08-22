@@ -15,6 +15,7 @@ use std::str::FromStr;
 #[grammar = "rrule.pest"]
 struct RRuleParser;
 
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RRule<'a> {

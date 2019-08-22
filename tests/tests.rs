@@ -2,6 +2,7 @@
 mod tests {
     use chrono::{Datelike, TimeZone, Timelike, Utc, Weekday};
     use chrono_tz::Etc::UTC;
+    use chrono_tz::Tz;
     use std::iter::Iterator;
     use sundial::{convert_to_rrule, validate_rrule, RRule, RuleParseError};
 
@@ -91,7 +92,15 @@ mod tests {
             RRuleTestCase {
                 rrule_string: "FREQ=WEEKLY;INTERVAL=1;BYHOUR=8,12;BYMINUTE=30,45;BYDAY=TU,SU;TZID=Australia/Perth;DTSTART=19970714T133000;UNTIL=21330422T133500Z",
                 expected_flat_json: r#"{"tzid":"Australia/Perth","dtstart":"1997-07-14 13:30:00","until":"2133-04-22 13:35:00","frequency":"WEEKLY","interval":"1","byHour":["8","12"],"byMinute":["30","45"],"byDay":["TU","SU"]}"#,
-            }
+            },
+            RRuleTestCase {
+                rrule_string: "FREQ=MONTHLY;INTERVAL=1;COUNT=1;BYMONTHDAY=10;BYHOUR=17",
+                expected_flat_json: r#"{"frequency":"MONTHLY","count":"1","interval":"1","byHour":["17"],"byMonthDay":["10"]}"#,
+            },
+            RRuleTestCase {
+                rrule_string: "FREQ=MONTHLY;INTERVAL=1;COUNT=1;BYHOUR=10;BYMONTHDAY=20",
+                expected_flat_json: r#"{"frequency":"MONTHLY","count":"1","interval":"1","byHour":["10"],"byMonthDay":["20"]}"#,
+            },
         ];
 
         for i in &rrule_test_cases {
@@ -711,6 +720,14 @@ mod tests {
             ),
             (
                 Utc.ymd(2019, 04, 12)
+                    .and_hms(16, 0, 0)
+                    .with_timezone(&UTC),
+                Utc.ymd(2019, 04, 12)
+                    .and_hms(17, 0, 0)
+                    .with_timezone(&UTC),
+            ),
+            (
+                Utc.ymd(2019, 04, 12)
                     .and_hms(18, 12, 13)
                     .with_timezone(&UTC),
                 Utc.ymd(2019, 05, 12)
@@ -723,6 +740,30 @@ mod tests {
                     .with_timezone(&UTC),
                 Utc.ymd(2019, 05, 12)
                     .and_hms(17, 12, 13)
+                    .with_timezone(&UTC),
+            ),
+        ];
+
+        for case in cases {
+            assert_eq!(
+                case.1,
+                rrule_result.get_next_date(case.0).with_timezone(&UTC)
+            )
+        }
+    }
+
+    #[test]
+    fn test_monthly_rrule_by_month_day_edge_cases_2() {
+        let rrule_result =
+            convert_to_rrule("FREQ=MONTHLY;INTERVAL=1;COUNT=1;BYHOUR=16;BYMONTHDAY=20").unwrap();
+        let cases = vec![
+        // 2019-08-20T22:24:45.866Z
+            (
+                Utc.ymd(2019, 08, 20)
+                    .and_hms(15, 0, 0)
+                    .with_timezone(&UTC),
+                Utc.ymd(2019, 08, 20)
+                    .and_hms(16, 0, 0)
                     .with_timezone(&UTC),
             ),
         ];
