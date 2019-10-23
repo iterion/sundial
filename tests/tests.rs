@@ -4,7 +4,7 @@ mod tests {
     use chrono_tz::Etc::UTC;
     use chrono_tz::Tz;
     use std::iter::Iterator;
-    use sundial::{convert_to_rrule, validate_rrule, RRule, RuleParseError};
+    use sundial::{convert_to_rrule, validate_rrule, RRule, RRuleByDay, RuleParseError};
 
     fn generate_rrule_from_json(json: &str) -> Result<RRule, RuleParseError> {
         let rrule = serde_json::from_str(json).unwrap();
@@ -124,7 +124,7 @@ mod tests {
             vec!["8", "28"],
             vec!["30", "45"],
             Vec::new(),
-            vec!["TU", "SU"],
+            vec![RRuleByDay::TU, RRuleByDay::SU],
             Vec::new(),
             Vec::new(),
         );
@@ -145,7 +145,7 @@ mod tests {
             vec!["8", "23"],
             vec!["30", "90"],
             Vec::new(),
-            vec!["TU", "SU"],
+            vec![RRuleByDay::TU, RRuleByDay::SU],
             Vec::new(),
             Vec::new(),
         );
@@ -166,7 +166,7 @@ mod tests {
             vec!["8", "23"],
             vec!["30", "50"],
             Vec::new(),
-            vec!["TU", "SU"],
+            vec![RRuleByDay::TU, RRuleByDay::SU],
             vec!["32"],
             Vec::new(),
         );
@@ -187,7 +187,7 @@ mod tests {
             vec!["8", "12"],
             vec!["30", "33"],
             Vec::new(),
-            vec!["TU", "SU"],
+            vec![RRuleByDay::TU, RRuleByDay::SU],
             vec!["22"],
             Vec::new(),
         );
@@ -353,6 +353,27 @@ mod tests {
                 .map(|date| date.format("%Y-%m-%d %H:%M:%S").to_string().to_owned())
                 .collect::<Vec<String>>()
         );
+    }
+
+    #[test]
+    fn test_daily_rules_work_7() {
+        // test we get the right next date
+        let rrule_result =
+            convert_to_rrule("FREQ=DAILY;BYHOUR=12;BYDAY=MO,TU,WE,TH,FR").unwrap();
+        let test_start_date = Utc
+            .ymd(2019, 10, 22)
+            .and_hms(01, 12, 13)
+            .with_timezone(&UTC);
+        let expected_next_date = Utc
+            .ymd(2019, 10, 23)
+            .and_hms(01, 12, 13)
+            .with_timezone(&UTC);
+        assert_eq!(
+            expected_next_date,
+            rrule_result
+                .get_next_date(test_start_date)
+                .with_timezone(&UTC)
+        )
     }
 
     #[test]
@@ -867,4 +888,5 @@ mod tests {
                 .len()
         )
     }
+    
 }

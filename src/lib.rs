@@ -15,6 +15,47 @@ use std::str::FromStr;
 #[grammar = "rrule.pest"]
 struct RRuleParser;
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd, Copy, Clone)]
+pub enum RRuleByDay {
+    MO = 1,
+    TU,
+    WE,
+    TH,
+    FR,
+    SA,
+    SU,
+}
+
+impl From<chrono::Weekday> for RRuleByDay {
+    fn from(chrono_weekday: chrono::Weekday) -> Self {
+        match chrono_weekday {
+            Weekday::Mon => RRuleByDay::MO,
+            Weekday::Tue => RRuleByDay::TU,
+            Weekday::Wed => RRuleByDay::WE,
+            Weekday::Thu => RRuleByDay::TH,
+            Weekday::Fri => RRuleByDay::FR,
+            Weekday::Sat => RRuleByDay::SA,
+            Weekday::Sun => RRuleByDay::SU,
+        }
+    }
+}
+
+impl FromStr for RRuleByDay {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<RRuleByDay, ()> {
+        match s {
+            "MO" => Ok(RRuleByDay::MO),
+            "TU" => Ok(RRuleByDay::TU),
+            "WE" => Ok(RRuleByDay::WE),
+            "TH" => Ok(RRuleByDay::TH),
+            "FR" => Ok(RRuleByDay::FR),
+            "SA" => Ok(RRuleByDay::SA),
+            "SU" => Ok(RRuleByDay::SU),
+            _ => Err(()),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -56,10 +97,9 @@ pub struct RRule<'a> {
     #[serde(borrow)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     by_second: Vec<&'a str>,
-    #[serde(default = "default_rrule_vec_field")]
-    #[serde(borrow)]
+    #[serde(default = "default_rrule_byday_vec_field")]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    by_day: Vec<&'a str>,
+    by_day: Vec<RRuleByDay>,
     #[serde(default = "default_rrule_vec_field")]
     #[serde(borrow)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -75,6 +115,10 @@ fn default_rrule_string_field() -> String {
 }
 
 fn default_rrule_vec_field<'a>() -> Vec<&'a str> {
+    Vec::new()
+}
+
+fn default_rrule_byday_vec_field<'a>() -> Vec<RRuleByDay> {
     Vec::new()
 }
 
@@ -119,7 +163,7 @@ impl<'a> RRule<'a> {
         by_hour: Vec<&'b str>,
         by_minute: Vec<&'b str>,
         by_second: Vec<&'b str>,
-        by_day: Vec<&'b str>,
+        by_day: Vec<RRuleByDay>,
         by_month_day: Vec<&'b str>,
         by_year_day: Vec<&'b str>,
     ) -> RRule<'b> {
@@ -472,7 +516,7 @@ impl<'a> RRule<'a> {
         let by_day = self
             .by_day
             .first()
-            .unwrap_or(&chrono_weekday_to_rrule_byday(start_date.weekday()))
+            .unwrap_or(&RRuleByDay::from(start_date.weekday()))
             .to_owned();
 
         let interval: u32 = self.interval.parse().unwrap_or(1);
@@ -499,11 +543,35 @@ impl<'a> RRule<'a> {
     fn handle_daily(&self, start_date: DateTime<Tz>) -> DateTime<Tz> {
         let start_date_with_intervals = self.with_initial_time_intervals(start_date);
 
-        let by_day = self.by_day.first().unwrap_or(&"").to_owned();
+        let by_day_first = self.by_day.first().unwrap_or(&RRuleByDay::MO).to_owned();
         let by_month = self.by_month.first().unwrap_or(&"").to_owned();
 
         let interval: u32 = self.interval.parse().unwrap_or(1);
         let mut next_date = start_date_with_intervals;
+
+        println!("bef: {}\t{}", next_date, start_date);
+        if !self.by_day.is_empty() {
+            // will adding days exceed the month?
+            // move to the next year if so
+            let days_to_adjust = self.calculate_weekday_distance(
+                by_day_first,
+                next_date.weekday(),
+                next_date < start_date,
+            );
+            next_date = next_date + Duration::days(days_to_adjust);
+            let weeks_to_adjust = if next_date <= start_date {
+                Duration::weeks(interval as i64)
+            } else {
+                Duration::weeks(0)
+            };
+            println!("added {:?} weeks", weeks_to_adjust);
+            next_date = next_date + weeks_to_adjust;
+        } else {
+          if next_date <= start_date {
+            next_date = next_date + Duration::days(interval as i64)
+          }
+        }
+        println!("aft: {}\t{}", next_date, start_date);
 
         if !by_month.is_empty() {
             let by_month_u32 = by_month.parse::<u32>().unwrap();
@@ -513,34 +581,6 @@ impl<'a> RRule<'a> {
             }
         }
 
-        println!("bef: {}\t{}", next_date, start_date);
-        if !by_day.is_empty() {
-            // will adding days exceed the month?
-            // move to the next year if so
-            let days_to_adjust = self.calculate_weekday_distance(
-                by_day,
-                next_date.weekday(),
-                next_date < start_date,
-            );
-            next_date = next_date + Duration::days(days_to_adjust);
-
-            //let diff = next_date - start_date;
-
-            let weeks_to_adjust = if next_date <= start_date {
-                Duration::weeks(interval as i64)
-            } else {
-                Duration::weeks(0)
-            };
-            println!("added {:?} weeks", weeks_to_adjust);
-            next_date = next_date + weeks_to_adjust;
-        }
-        println!("aft: {}\t{}", next_date, start_date);
-
-        // If the calculated next_date is greater than the start date we don't need to add another
-        // interval
-        if next_date.le(&start_date) {
-            next_date = next_date + Duration::days(interval as i64)
-        }
 
         if next_date <= start_date {
             next_date = next_date.with_year(next_date.year() + 1).unwrap();
@@ -554,12 +594,12 @@ impl<'a> RRule<'a> {
         let interval: u32 = self.interval.parse().unwrap_or(1);
 
         let by_hour = self.by_hour.first().unwrap_or(&"").to_owned();
-        let by_day = self.by_day.first().unwrap_or(&"").to_owned();
+        let by_day_first = self.by_day.first().unwrap_or(&RRuleByDay::MO).to_owned();
         let by_month = self.by_month.first().unwrap_or(&"").to_owned();
 
         if by_hour.is_empty() {
             if by_month.is_empty() {
-                if by_day.is_empty() {
+                if self.by_day.is_empty() {
                     for _i in 0..interval {
                         next_date = next_date + Duration::hours(1)
                     }
@@ -568,12 +608,12 @@ impl<'a> RRule<'a> {
                         for _i in 0..interval {
                             next_date = next_date + Duration::hours(1)
                         }
-                        if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day) {
+                        if by_day_first == next_date.weekday().into() {
                             break;
                         }
                     }
                 }
-            } else if by_day.is_empty() {
+            } else if self.by_day.is_empty() {
                 for _i in 0..interval {
                     next_date = next_date + Duration::hours(1)
                 }
@@ -582,7 +622,7 @@ impl<'a> RRule<'a> {
                     for _i in 0..interval {
                         next_date = next_date + Duration::hours(1)
                     }
-                    if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day)
+                    if by_day_first == next_date.weekday().into()
                         && next_date.month().eq(&(by_month.parse::<u32>().unwrap()))
                     {
                         break;
@@ -592,7 +632,7 @@ impl<'a> RRule<'a> {
         } else {
             loop {
                 if by_month.is_empty() {
-                    if by_day.is_empty() {
+                    if self.by_day.is_empty() {
                         for _i in 0..interval {
                             next_date = next_date + Duration::hours(1)
                         }
@@ -601,12 +641,12 @@ impl<'a> RRule<'a> {
                             for _i in 0..interval {
                                 next_date = next_date + Duration::hours(1)
                             }
-                            if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day) {
+                            if by_day_first == next_date.weekday().into() {
                                 break;
                             }
                         }
                     }
-                } else if by_day.is_empty() {
+                } else if self.by_day.is_empty() {
                     for _i in 0..interval {
                         next_date = next_date + Duration::hours(1)
                     }
@@ -615,7 +655,7 @@ impl<'a> RRule<'a> {
                         for _i in 0..interval {
                             next_date = next_date + Duration::hours(1)
                         }
-                        if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day)
+                        if by_day_first == next_date.weekday().into()
                             && next_date.month().eq(&(by_month.parse::<u32>().unwrap()))
                         {
                             break;
@@ -635,13 +675,13 @@ impl<'a> RRule<'a> {
         let mut next_date = self.with_initial_time_intervals(start_date);
         let interval: u32 = self.interval.parse().unwrap_or(1);
 
-        let by_day = self.by_day.first().unwrap_or(&"").to_owned();
+        let by_day_first = self.by_day.first().unwrap_or(&RRuleByDay::MO).to_owned();
         let by_month = self.by_month.first().unwrap_or(&"").to_owned();
         let by_hour = self.by_hour.first().unwrap_or(&"").to_owned();
 
         if by_hour.is_empty() {
             if by_month.is_empty() {
-                if by_day.is_empty() {
+                if self.by_day.is_empty() {
                     for _i in 0..interval {
                         next_date = next_date + Duration::minutes(1)
                     }
@@ -650,12 +690,12 @@ impl<'a> RRule<'a> {
                         for _i in 0..interval {
                             next_date = next_date + Duration::minutes(1)
                         }
-                        if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day) {
+                        if by_day_first == next_date.weekday().into() {
                             break;
                         }
                     }
                 }
-            } else if by_day.is_empty() {
+            } else if self.by_day.is_empty() {
                 for _i in 0..interval {
                     next_date = next_date + Duration::minutes(1)
                 }
@@ -664,7 +704,7 @@ impl<'a> RRule<'a> {
                     for _i in 0..interval {
                         next_date = next_date + Duration::minutes(1)
                     }
-                    if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day)
+                    if by_day_first == next_date.weekday().into()
                         && next_date.month().eq(&(by_month.parse::<u32>().unwrap()))
                     {
                         break;
@@ -674,7 +714,7 @@ impl<'a> RRule<'a> {
         } else {
             loop {
                 if by_month.is_empty() {
-                    if by_day.is_empty() {
+                    if self.by_day.is_empty() {
                         for _i in 0..interval {
                             next_date = next_date + Duration::minutes(1)
                         }
@@ -683,12 +723,12 @@ impl<'a> RRule<'a> {
                             for _i in 0..interval {
                                 next_date = next_date + Duration::minutes(1)
                             }
-                            if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day) {
+                            if by_day_first == next_date.weekday().into() {
                                 break;
                             }
                         }
                     }
-                } else if by_day.is_empty() {
+                } else if self.by_day.is_empty() {
                     for _i in 0..interval {
                         next_date = next_date + Duration::minutes(1)
                     }
@@ -697,7 +737,7 @@ impl<'a> RRule<'a> {
                         for _i in 0..interval {
                             next_date = next_date + Duration::minutes(1)
                         }
-                        if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day)
+                        if by_day_first == next_date.weekday().into()
                             && next_date.month().eq(&(by_month.parse::<u32>().unwrap()))
                         {
                             break;
@@ -716,11 +756,12 @@ impl<'a> RRule<'a> {
         let mut next_date = self.with_initial_time_intervals(start_date);
         let interval: u32 = self.interval.parse().unwrap_or(1);
 
-        let by_day = self.by_day.first().unwrap_or(&"").to_owned();
+        // TODO fixme
+        let by_day_first = self.by_day.first().unwrap_or(&RRuleByDay::MO).to_owned();
         let by_month = self.by_month.first().unwrap_or(&"").to_owned();
 
         if by_month.is_empty() {
-            if by_day.is_empty() {
+            if self.by_day.is_empty() {
                 for _i in 0..interval {
                     next_date = next_date + Duration::seconds(1)
                 }
@@ -729,12 +770,12 @@ impl<'a> RRule<'a> {
                     for _i in 0..interval {
                         next_date = next_date + Duration::seconds(1)
                     }
-                    if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day) {
+                    if by_day_first == next_date.weekday().into() {
                         break;
                     }
                 }
             }
-        } else if by_day.is_empty() {
+        } else if self.by_day.is_empty() {
             for _i in 0..interval {
                 next_date = next_date + Duration::seconds(1)
             }
@@ -743,7 +784,7 @@ impl<'a> RRule<'a> {
                 for _i in 0..interval {
                     next_date = next_date + Duration::seconds(1)
                 }
-                if chrono_weekday_to_rrule_byday(next_date.weekday()).eq(by_day)
+                if by_day_first == next_date.weekday().into()
                     && next_date.month().eq(&(by_month.parse::<u32>().unwrap()))
                 {
                     break;
@@ -752,6 +793,10 @@ impl<'a> RRule<'a> {
         }
         next_date
     }
+
+    //fn bydayvec_to_weekday_vec() -> Vec<Weekday> {
+    //    vec!
+    //}
 
     /// Calculates the weekdays to add based on the given byweekday and current weekday.
     /// Use the `in_future_from_current_day` property to determine whether we should use the
@@ -763,14 +808,14 @@ impl<'a> RRule<'a> {
     /// current tuesday
     fn calculate_weekday_distance(
         &self,
-        bywk_day: &str,
+        bywk_day: RRuleByDay,
         current_weekday: Weekday,
         in_future_from_current_day: bool,
     ) -> i64 {
         let number_from_mon = current_weekday.number_from_monday();
         let mut adjustment: i64 = 0;
         match bywk_day {
-            "MO" => {
+            RRuleByDay::MO => {
                 match number_from_mon {
                     1 => {
                         // monday
@@ -807,7 +852,7 @@ impl<'a> RRule<'a> {
                     _ => {}
                 }
             }
-            "TU" => {
+            RRuleByDay::TU => {
                 match number_from_mon {
                     1 => {
                         // monday
@@ -844,7 +889,7 @@ impl<'a> RRule<'a> {
                     _ => {}
                 }
             }
-            "WE" => {
+            RRuleByDay::WE => {
                 match number_from_mon {
                     1 => {
                         // monday
@@ -881,7 +926,7 @@ impl<'a> RRule<'a> {
                     _ => {}
                 }
             }
-            "TH" => {
+            RRuleByDay::TH => {
                 match number_from_mon {
                     1 => {
                         // monday
@@ -918,7 +963,7 @@ impl<'a> RRule<'a> {
                     _ => {}
                 }
             }
-            "FR" => {
+            RRuleByDay::FR => {
                 match number_from_mon {
                     1 => {
                         // monday
@@ -955,7 +1000,7 @@ impl<'a> RRule<'a> {
                     _ => {}
                 }
             }
-            "SA" => {
+            RRuleByDay::SA => {
                 match number_from_mon {
                     1 => {
                         // monday
@@ -992,7 +1037,7 @@ impl<'a> RRule<'a> {
                     _ => {}
                 }
             }
-            "SU" => {
+            RRuleByDay::SU => {
                 match number_from_mon {
                     1 => {
                         // monday
@@ -1029,7 +1074,6 @@ impl<'a> RRule<'a> {
                     _ => {}
                 }
             }
-            _ => {}
         }
         adjustment
     }
@@ -1055,7 +1099,7 @@ impl Error for RuleValidationError {
         "Encountered Rrule validation errors"
     }
 
-    fn cause(&self) -> Option<&std::error::Error> {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
         None
     }
 }
@@ -1074,21 +1118,9 @@ impl Error for RuleParseError {
         "encountered parsing errors"
     }
 
-    fn cause(&self) -> Option<&std::error::Error> {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
         None
     }
-}
-
-fn chrono_weekday_to_rrule_byday(weekday: Weekday) -> &'static str {
-    return match weekday {
-        Weekday::Mon => "MO",
-        Weekday::Tue => "TU",
-        Weekday::Wed => "WE",
-        Weekday::Thu => "TH",
-        Weekday::Fri => "FR",
-        Weekday::Sat => "SA",
-        Weekday::Sun => "SU",
-    };
 }
 
 /// Adds a month to a given timezone aware `DateTime` type and takes care of any monthly boundaries
@@ -1296,6 +1328,7 @@ pub fn convert_to_rrule(rrule_string: &str) -> Result<RRule, RuleParseError> {
                     .unwrap()
                     .as_str()
                     .split(',')
+                    .map(|x| RRuleByDay::from_str(x).unwrap())
                     .collect();
             }
 
